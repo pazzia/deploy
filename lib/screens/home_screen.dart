@@ -3,13 +3,23 @@ import 'package:flutter/material.dart';
 import '../models/progress.dart';
 
 class HomeScreen extends StatelessWidget {
-  const HomeScreen({super.key, required this.progress, required this.onContinue, required this.onProfile});
+  const HomeScreen({
+    super.key,
+    required this.progress,
+    required this.onContinue,
+    required this.onProfile,
+    required this.onHardcoreChanged,
+  });
   final AppProgress progress;
   final VoidCallback onContinue;
   final VoidCallback onProfile;
+  final ValueChanged<bool> onHardcoreChanged;
 
   @override
   Widget build(BuildContext context) {
+    final completed = progress.hardcoreMode
+        ? progress.hardcoreCompletedLevelIds.length
+        : progress.completedLevelIds.length;
     return Scaffold(
       appBar: AppBar(
         title: const Text('CodeQuest', style: TextStyle(fontWeight: FontWeight.w800)),
@@ -25,20 +35,41 @@ class HomeScreen extends StatelessWidget {
             const SizedBox(width: 10),
             Expanded(child: _Stat(icon: Icons.favorite, value: '${progress.lives}', label: 'жизни')),
           ]),
-          const SizedBox(height: 24),
+          const SizedBox(height: 18),
+          Card(
+            child: SwitchListTile(
+              value: progress.hardcoreMode,
+              onChanged: onHardcoreChanged,
+              secondary: Icon(progress.hardcoreMode ? Icons.timer : Icons.timer_outlined),
+              title: const Text('Hardcore Mode', style: TextStyle(fontWeight: FontWeight.w800)),
+              subtitle: const Text('10 минут на всю рубрику. Не успел — прогресс рубрики сбрасывается.'),
+            ),
+          ),
+          const SizedBox(height: 18),
           Card(
             child: Padding(
               padding: const EdgeInsets.all(20),
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                const Text('PYTHON PATH', style: TextStyle(fontWeight: FontWeight.w700)),
+                Text(progress.hardcoreMode ? 'PYTHON HARDCORE' : 'PYTHON PATH', style: const TextStyle(fontWeight: FontWeight.w700)),
                 const SizedBox(height: 8),
                 Text('Основы Python', style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800)),
                 const SizedBox(height: 8),
-                Text('${progress.completedLevelIds.length} из 20 уровней завершено'),
+                Text('$completed из 20 уровней завершено'),
+                if (progress.hardcoreMode) ...[
+                  const SizedBox(height: 6),
+                  const Text('За прохождение в Hardcore начисляется ×2 XP.'),
+                ],
                 const SizedBox(height: 14),
-                LinearProgressIndicator(value: progress.completedLevelIds.length / 20),
+                LinearProgressIndicator(value: completed / 20),
                 const SizedBox(height: 18),
-                SizedBox(width: double.infinity, child: FilledButton.icon(onPressed: onContinue, icon: const Icon(Icons.play_arrow), label: const Text('Продолжить обучение'))),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.icon(
+                    onPressed: onContinue,
+                    icon: Icon(progress.hardcoreMode ? Icons.timer : Icons.play_arrow),
+                    label: Text(progress.hardcoreMode ? 'Начать испытание' : 'Продолжить обучение'),
+                  ),
+                ),
               ]),
             ),
           ),
