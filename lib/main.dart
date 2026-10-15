@@ -70,20 +70,28 @@ class _HomeFlow extends StatelessWidget {
   Widget build(BuildContext context) {
     return HomeScreen(
       progress: controller.progress,
-      onProfile: () => Navigator.push(context, MaterialPageRoute(builder: (_) => ProfileScreen(progress: controller.progress))),
+      onHardcoreChanged: (enabled) => controller.setHardcoreMode(enabled, seedLevels),
+      onProfile: () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => ProfileScreen(progress: controller.progress)),
+      ),
       onContinue: () => Navigator.push(
         context,
         MaterialPageRoute(
           builder: (_) => LearningMapScreen(
             levels: seedLevels,
-            progress: controller.progress,
-            isUnlocked: (index) => controller.isUnlocked(seedLevels, index),
+            controller: controller,
             onLevel: (Level level) => Navigator.push(
               context,
               MaterialPageRoute(
                 builder: (_) => LevelScreen(
                   level: level,
-                  onSubmit: (answer, mistakes) => controller.submit(level: level, answer: answer, mistakes: mistakes),
+                  onSubmit: (answer, mistakes) => controller.submit(
+                    level: level,
+                    answer: answer,
+                    mistakes: mistakes,
+                    allLevels: seedLevels,
+                  ),
                 ),
               ),
             ),
