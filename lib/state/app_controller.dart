@@ -10,8 +10,6 @@ class AppController extends ChangeNotifier {
       : _store = store ?? ProgressStore(),
         _engine = engine ?? const LevelEngine();
 
-  static const hardcoreDuration = Duration(minutes: 10);
-
   final ProgressStore _store;
   final LevelEngine _engine;
 
@@ -35,6 +33,22 @@ class AppController extends ChangeNotifier {
     if (enabled) await refreshHardcoreExpirations(levels, notify: false);
     await _store.save(progress);
     notifyListeners();
+  }
+
+  Duration hardcoreDurationFor(String module) => switch (module) {
+        'Variables' => const Duration(minutes: 5),
+        'Types' => const Duration(minutes: 6),
+        'Operators' => const Duration(minutes: 7),
+        'Conditions' => const Duration(minutes: 8),
+        'Loops' => const Duration(minutes: 10),
+        _ => const Duration(minutes: 10),
+      };
+
+  int hardcoreTimeBonusFor(String module, Duration remaining) {
+    final max = hardcoreDurationFor(module).inSeconds;
+    if (max <= 0 || remaining.inSeconds <= 0) return 0;
+    final ratio = (remaining.inSeconds / max).clamp(0.0, 1.0);
+    return (100 * ratio).round();
   }
 
   bool isUnlocked(List<Level> levels, int index) {
@@ -137,16 +151,21 @@ class AppController extends ChangeNotifier {
     final moduleLevels = allLevels.where((item) => item.module == level.module).toList();
     final moduleCompleted = moduleLevels.isNotEmpty && moduleLevels.every((item) => completed.contains(item.id));
 
+    var timeBonus = 0;
     if (moduleCompleted) {
+      final remaining = hardcoreRemainingFor(level.module);
+      if (remaining != null) {
+        timeBonus = hardcoreTimeBonusFor(level.module, remaining);
+      }
       deadlines.remove(level.module);
     } else if (!deadlines.containsKey(level.module)) {
-      deadlines[level.module] = DateTime.now().add(hardcoreDuration).toIso8601String();
+      deadlines[level.module] = DateTime.now().add(hardcoreDurationFor(level.module)).toIso8601String();
     }
 
     progress = progress.copyWith(
       hardcoreCompletedLevelIds: completed,
       hardcoreDeadlines: deadlines,
-      totalXp: progress.totalXp + (alreadyCompleted ? 0 : resultXpBonus(level)),
+      totalXp: progress.totalXp + (alreadyCompleted ? 0 : resultXpBonus(level)) + timeBonus,
       streak: _calculateStreak(progress.lastActiveDay, progress.streak),
       lastActiveDay: _today(),
     );
