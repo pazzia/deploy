@@ -10,6 +10,8 @@ class AppController extends ChangeNotifier {
       : _store = store ?? ProgressStore(),
         _engine = engine ?? const LevelEngine();
 
+  static const hardcoreDuration = Duration(minutes: 10);
+
   final ProgressStore _store;
   final LevelEngine _engine;
 
@@ -28,23 +30,96 @@ class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> setHardcoreMode(bool enabled, List<Level> levels) async {
+    progress = progress.copyWith(hardcoreMode: enabled);
+    if (enabled) await refreshHardcoreExpirations(levels, notify: false);
+    await _store.save(progress);
+    notifyListeners();
+  }
+
   bool isUnlocked(List<Level> levels, int index) {
+    if (progress.hardcoreMode) return isHardcoreUnlocked(levels, index);
     if (index == 0) return true;
     return progress.completedLevelIds.contains(levels[index - 1].id);
   }
 
-  Future<LevelResult> submit({required Level level, required String answer, required int mistakes}) async {
+  bool isHardcoreUnlocked(List<Level> levels, int index) {
+    final level = levels[index];
+    final moduleLevels = levels.where((item) => item.module == level.module).toList();
+    final moduleIndex = moduleLevels.indexWhere((item) => item.id == level.id);
+    if (moduleIndex == 0) return true;
+    return progress.hardcoreCompletedLevelIds.contains(moduleLevels[moduleIndex - 1].id);
+  }
+
+  bool isCompleted(Level level) => progress.hardcoreMode
+      ? progress.hardcoreCompletedLevelIds.contains(level.id)
+      : progress.completedLevelIds.contains(level.id);
+
+  DateTime? hardcoreDeadlineFor(String module) {
+    final raw = progress.hardcoreDeadlines[module];
+    return raw == null ? null : DateTime.tryParse(raw);
+  }
+
+  Duration? hardcoreRemainingFor(String module) {
+    final deadline = hardcoreDeadlineFor(module);
+    if (deadline == null) return null;
+    final remaining = deadline.difference(DateTime.now());
+    return remaining.isNegative ? Duration.zero : remaining;
+  }
+
+  Future<void> refreshHardcoreExpirations(List<Level> levels, {bool notify = true}) async {
+    var changed = false;
+    final completed = <String>[...progress.hardcoreCompletedLevelIds];
+    final deadlines = <String, String>{...progress.hardcoreDeadlines};
+
+    for (final entry in progress.hardcoreDeadlines.entries.toList()) {
+      final deadline = DateTime.tryParse(entry.value);
+      if (deadline == null || DateTime.now().isBefore(deadline)) continue;
+      final moduleLevels = levels.where((level) => level.module == entry.key).toList();
+      final allDone = moduleLevels.isNotEmpty && moduleLevels.every((level) => completed.contains(level.id));
+      if (!allDone) {
+        final ids = moduleLevels.map((level) => level.id).toSet();
+        completed.removeWhere(ids.contains);
+      }
+      deadlines.remove(entry.key);
+      changed = true;
+    }
+
+    if (changed) {
+      progress = progress.copyWith(
+        hardcoreCompletedLevelIds: completed,
+        hardcoreDeadlines: deadlines,
+      );
+      await _store.save(progress);
+      if (notify) notifyListeners();
+    }
+  }
+
+  Future<LevelResult> submit({
+    required Level level,
+    required String answer,
+    required int mistakes,
+    List<Level> allLevels = const <Level>[],
+  }) async {
+    if (progress.hardcoreMode && allLevels.isNotEmpty) {
+      await refreshHardcoreExpirations(allLevels, notify: false);
+    }
+
     final result = _engine.evaluate(level, answer, mistakes);
     if (result.isCorrect) {
-      final alreadyCompleted = progress.completedLevelIds.contains(level.id);
-      final completed = <String>[...progress.completedLevelIds];
-      if (!alreadyCompleted) completed.add(level.id);
-      progress = progress.copyWith(
-        completedLevelIds: completed,
-        totalXp: progress.totalXp + (alreadyCompleted ? 0 : result.xpAwarded),
-        streak: _calculateStreak(progress.lastActiveDay, progress.streak),
-        lastActiveDay: _today(),
-      );
+      if (progress.hardcoreMode) {
+        await _completeHardcoreLevel(level, allLevels);
+      } else {
+        final alreadyCompleted = progress.completedLevelIds.contains(level.id);
+        final completed = <String>[...progress.completedLevelIds];
+        if (!alreadyCompleted) completed.add(level.id);
+        progress = progress.copyWith(
+          completedLevelIds: completed,
+          totalXp: progress.totalXp + (alreadyCompleted ? 0 : result.xpAwarded),
+          streak: _calculateStreak(progress.lastActiveDay, progress.streak),
+          lastActiveDay: _today(),
+        );
+      }
     } else {
       progress = progress.copyWith(lives: progress.lives > 0 ? progress.lives - 1 : 0);
     }
@@ -52,6 +127,32 @@ class AppController extends ChangeNotifier {
     notifyListeners();
     return result;
   }
+
+  Future<void> _completeHardcoreLevel(Level level, List<Level> allLevels) async {
+    final completed = <String>[...progress.hardcoreCompletedLevelIds];
+    final deadlines = <String, String>{...progress.hardcoreDeadlines};
+    final alreadyCompleted = completed.contains(level.id);
+    if (!alreadyCompleted) completed.add(level.id);
+
+    final moduleLevels = allLevels.where((item) => item.module == level.module).toList();
+    final moduleCompleted = moduleLevels.isNotEmpty && moduleLevels.every((item) => completed.contains(item.id));
+
+    if (moduleCompleted) {
+      deadlines.remove(level.module);
+    } else if (!deadlines.containsKey(level.module)) {
+      deadlines[level.module] = DateTime.now().add(hardcoreDuration).toIso8601String();
+    }
+
+    progress = progress.copyWith(
+      hardcoreCompletedLevelIds: completed,
+      hardcoreDeadlines: deadlines,
+      totalXp: progress.totalXp + (alreadyCompleted ? 0 : resultXpBonus(level)),
+      streak: _calculateStreak(progress.lastActiveDay, progress.streak),
+      lastActiveDay: _today(),
+    );
+  }
+
+  int resultXpBonus(Level level) => level.xp * 2;
 
   int _calculateStreak(String? lastDay, int current) {
     final today = DateTime.now();
